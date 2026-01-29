@@ -215,14 +215,34 @@ router.post('/', isAuthenticated, checkPermission('product:create'), async (req:
 router.patch('/:id', isAuthenticated, checkPermission('product:update'), async (req, res) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
-        const product = await productService.updateProduct(req.session.user!.organizationId, id, updateData);
+        // Clone the body to ensure we can mutate it safely
+        const updateData = { ...req.body };
+        const organizationId = req.session.user!.organizationId;
+
+        // Sanitize data: valid Drizzle/Postgres updates require null for empty strings on nullable columns
+        if (updateData.barcode === "") updateData.barcode = null;
+        if (updateData.sku === "") updateData.sku = null;
+        if (updateData.imageUrl === "") updateData.imageUrl = null;
+        if (updateData.description === "") updateData.description = null;
+        if (updateData.costPerUnit === "") updateData.costPerUnit = null;
+
+        // Ensure minThreshold is an integer
+        if (updateData.minThreshold !== undefined && updateData.minThreshold !== null) {
+            const original = updateData.minThreshold;
+            updateData.minThreshold = Math.round(Number(updateData.minThreshold));
+            console.error(`Sanitized minThreshold: ${original} -> ${updateData.minThreshold}`);
+        }
+
+        console.error('PATCH /api/products/:id - Sanitized Data:', JSON.stringify(updateData).slice(0, 200));
+
+        const product = await productService.updateProduct(organizationId, id, updateData);
         res.json(product);
-    } catch (error) {
-        console.error("Error updating product:", error);
-        res.status(500).json({ message: "Failed to update product" });
+    } catch (error: any) {
+        console.error("Error updating product:", error?.message || error, error?.stack);
+        res.status(500).json({ message: "Failed to update product", error: error?.message });
     }
 });
+
 
 /**
  * DELETE /api/products/:id

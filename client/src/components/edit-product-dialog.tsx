@@ -23,6 +23,9 @@ import { insertProductSchema, type InsertProduct, type Product, type Category } 
 const formSchema = insertProductSchema.extend({
   barcodes: z.array(z.string()).optional(),
   imageUrl: z.string().optional(),
+  // Override to coerce string inputs to numbers
+  minThreshold: z.coerce.number().min(0, "Minimum threshold must be 0 or greater").default(5),
+  stockQuantity: z.coerce.number().min(0, "Stock quantity must be 0 or greater").default(0),
 });
 type EditProductForm = z.infer<typeof formSchema>;
 
@@ -536,8 +539,7 @@ export function EditProductDialog({ product, children }: EditProductDialogProps)
                             type="number"
                             min="0"
                             placeholder="5"
-                            value={field.value ?? ""}
-                            onChange={(e) => field.onChange(e.target.value === "" ? 0 : parseInt(e.target.value, 10))}
+                            {...field}
                           />
                         </FormControl>
                         <FormMessage />

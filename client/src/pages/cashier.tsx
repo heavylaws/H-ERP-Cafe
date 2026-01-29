@@ -1227,7 +1227,7 @@ export default function CashierPOS() {
                           <div className="flex space-x-2">
                             <Button
                               onClick={() => processOrderPayment(order.id, 'cash', parseFloat(order.total))}
-                              className="flex-1 bg-secondary text-white hover:bg-green-700"
+                              className="flex-1 bg-green-600 text-white hover:bg-green-700"
                               disabled={updateOrderMutation.isPending || deleteOrderMutation.isPending}
                             >
                               <DollarSign className="h-4 w-4 mr-1" />
@@ -1453,7 +1453,7 @@ export default function CashierPOS() {
                         <div className="grid grid-cols-2 gap-2">
                           <Button
                             onClick={() => processPayment('cash')}
-                            className="py-4 bg-secondary text-white hover:bg-green-700"
+                            className="py-4 bg-green-600 text-white hover:bg-green-700"
                             disabled={currentOrder.items.length === 0 || createOrderMutation.isPending}
                           >
                             <DollarSign className="h-5 w-5 mr-2" />

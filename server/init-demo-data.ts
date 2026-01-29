@@ -4,71 +4,15 @@ export async function initializeDemoData() {
   console.log("🔄 Initializing demo data...");
 
   try {
-    // Check if demo users already exist
-    const existingUsers = await storage.getAllUsers();
-    if (existingUsers.length > 0) {
+    // Check if demo products already exist (users are handled separately)
+    const existingProducts = await storage.getProducts();
+    if (existingProducts.length > 0) {
       console.log("✅ Demo data already exists, skipping initialization");
       return;
     }
 
-    // Create demo users
-    const demoUsers = [
-      {
-        id: "admin",
-        username: "admin",
-        password: "admin123",
-        email: "admin@highway-cafe.com",
-        firstName: "Admin",
-        lastName: "User",
-        role: "admin" as const,
-        isActive: true,
-      },
-      {
-        id: "manager",
-        username: "manager",
-        password: "manager123",
-        email: "manager@highway-cafe.com",
-        firstName: "Manager",
-        lastName: "User",
-        role: "manager" as const,
-        isActive: true,
-      },
-      {
-        id: "cashier",
-        username: "cashier",
-        password: "cashier123",
-        email: "cashier@highway-cafe.com",
-        firstName: "Cashier",
-        lastName: "User",
-        role: "cashier" as const,
-        isActive: true,
-      },
-      {
-        id: "technician",
-        username: "technician",
-        password: "technician123",
-        email: "technician@h-erp.com",
-        firstName: "Technician",
-        lastName: "User",
-        role: "technician" as const,
-        isActive: true,
-      },
-      {
-        id: "courier",
-        username: "courier",
-        password: "courier123",
-        email: "courier@highway-cafe.com",
-        firstName: "Courier",
-        lastName: "User",
-        role: "courier" as const,
-        isActive: true,
-      },
-    ];
-
-    console.log("👥 Creating demo users...");
-    for (const user of demoUsers) {
-      await storage.upsertUser(user);
-    }
+    // Note: Demo users are created by routes.ts with bcrypt hashing
+    // This function only handles categories, components, products, and bundles
 
     // Create categories
     const demoCategories = [

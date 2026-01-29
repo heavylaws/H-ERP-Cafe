@@ -1341,7 +1341,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { id } = req.params;
-      const updateData = req.body;
+      // Clone body to mutable object
+      const updateData = { ...req.body };
+
+      // Sanitize data: valid Drizzle/Postgres updates require null for empty strings on nullable columns
+      if (updateData.barcode === "") updateData.barcode = null;
+      if (updateData.sku === "") updateData.sku = null;
+      if (updateData.imageUrl === "") updateData.imageUrl = null;
+      if (updateData.description === "") updateData.description = null;
+      if (updateData.costPerUnit === "") updateData.costPerUnit = null;
+
+      // Ensure minThreshold is an integer
+      if (updateData.minThreshold !== undefined && updateData.minThreshold !== null) {
+        const original = updateData.minThreshold;
+        updateData.minThreshold = Math.round(Number(updateData.minThreshold));
+        console.error(`Legacy PATCH: Sanitized minThreshold: ${original} -> ${updateData.minThreshold}`);
+      }
+
+      console.error('Legacy PATCH /api/products/:id - Sanitized Data:', JSON.stringify(updateData).slice(0, 200));
+
       const product = await storage.updateProduct(id, updateData);
       res.json(product);
     } catch (error) {

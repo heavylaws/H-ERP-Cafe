@@ -160,3 +160,5 @@ backups/
 # Local files
 .local/
 .remote-host
+
+remote_backups/
