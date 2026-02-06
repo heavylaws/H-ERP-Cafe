@@ -1,63 +1,99 @@
-import { writeFile } from 'fs/promises';
-import { constants, accessSync } from 'fs';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
+import { createCanvas, registerFont, Canvas } from 'canvas';
 // @ts-ignore
-import { ArabicShaper } from 'arabic-persian-reshaper';
-import iconv from 'iconv-lite';
-import { CP864_MAPPING } from './cp864-map';
+import ArabicReshaper from 'arabic-persian-reshaper';
 
-// ESC/POS Commands
-const CMD = {
-    INIT: Buffer.from([0x1B, 0x40]),
-    KANJI_OFF: Buffer.from([0x1C, 0x2E]),
-    // Code Page 22 (Arabic PC864)
-    CODEPAGE_ARABIC: Buffer.from([0x1B, 0x74, 22]),
-    ALIGN_CENTER: Buffer.from([0x1B, 0x61, 0x01]),
-    ALIGN_LEFT: Buffer.from([0x1B, 0x61, 0x00]),
-    ALIGN_RIGHT: Buffer.from([0x1B, 0x61, 0x02]),
-    BOLD_ON: Buffer.from([0x1B, 0x45, 0x01]),
-    BOLD_OFF: Buffer.from([0x1B, 0x45, 0x00]),
-    SIZE_NORMAL: Buffer.from([0x1D, 0x21, 0x00]),
-    SIZE_DOUBLE: Buffer.from([0x1D, 0x21, 0x11]),
-    CUT: Buffer.from([0x1D, 0x56, 0x41, 0x03]),
-    FEED: Buffer.from([0x0A]),
+// Register Arabic fonts
+try {
+    const fontPathRegular = '/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf';
+    const fontPathBold = '/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf';
+    if (fs.existsSync(fontPathRegular)) {
+        registerFont(fontPathRegular, { family: 'ArabicFont', weight: 'normal' });
+    }
+    if (fs.existsSync(fontPathBold)) {
+        registerFont(fontPathBold, { family: 'ArabicFont', weight: 'bold' });
+    }
+} catch (e) {
+    console.warn('Failed to register Arabic fonts, using system default', e);
+}
+
+// ESC/POS thermal printer implementation
+const ESC = '\x1b';
+const GS = '\x1d';
+const ESCPOS = {
+    INIT: ESC + '@',
+    CUT: GS + 'V' + '\x00',
+    PARTIAL_CUT: GS + 'V' + '\x01',
 };
 
 export class ReceiptPrinter {
-    private devicePath: string;
+    private devicePath = '/dev/usb/lp1';
+    private width = 576; // 80mm paper width in pixels (standard is 576 dots)
+    private lineHeight = 30;
+    private padding = 10;
 
     constructor() {
-        // Try multiple possible device paths
-        const possiblePaths = ['/dev/usb/lp1', '/dev/usb/lp0', '/dev/lp1', '/dev/lp0'];
-        this.devicePath = '';
+        console.log('Printer initialized using Bitmap/Canvas mode for Arabic support');
+    }
 
-        for (const path of possiblePaths) {
-            try {
-                // Check synchronously if file exists
-                accessSync(path, constants.F_OK);
-                this.devicePath = path;
-                console.log(`Printer device found at: ${this.devicePath}`);
-                break;
-            } catch (err) {
-                console.log(`Failed to access ${path}:`, err);
-                // Try next path
+    private reshapeArabic(text: string): string {
+        try {
+            // Reshape Arabic characters (fix ligatures)
+            const reshaped = ArabicReshaper.convert(text);
+            // Check if string contains Arabic
+            const hasArabic = /[\u0600-\u06FF]/.test(reshaped);
+            if (hasArabic) {
+                // Reverse for RTL rendering (since we draw manually)
+                return reshaped.split('').reverse().join('');
             }
-        }
-
-        if (!this.devicePath) {
-            console.warn('No writable printer device found. Print operations will fail.');
+            return reshaped;
+        } catch (e) {
+            return text;
         }
     }
 
-    private async write(buffer: Buffer): Promise<void> {
-        if (!this.devicePath) {
-            throw new Error('No printer device available');
+    private convertToRaster(canvas: Canvas): Buffer {
+        const context = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        const imageData = context.getImageData(0, 0, width, height);
+        const data = imageData.data;
+
+        // Calculate width in bytes (rounded up to nearest byte)
+        const bytesPerLine = Math.ceil(width / 8);
+        const buffer = Buffer.alloc(bytesPerLine * height);
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const offset = (y * width + x) * 4;
+                const r = data[offset];
+                const g = data[offset + 1];
+                const b = data[offset + 2];
+                const a = data[offset + 3];
+
+                // Simple threshold for monochrome (white background, black text)
+                // Pixel is black if brightness < 128 and not transparent
+                // Logic: 0 = white, 1 = black for GS v 0 command
+                const brightness = (r + g + b) / 3;
+                const isBlack = a > 128 && brightness < 128;
+
+                if (isBlack) {
+                    const byteIndex = y * bytesPerLine + Math.floor(x / 8);
+                    const bitIndex = 7 - (x % 8);
+                    buffer[byteIndex] |= (1 << bitIndex);
+                }
+            }
         }
 
-        try {
-            await writeFile(this.devicePath, buffer);
-        } catch (error: any) {
-            throw new Error(`Failed to write to printer: ${error.message}`);
-        }
+        // GS v 0 m xL xH yL yH d1...dk
+        const header = Buffer.from([
+            0x1d, 0x76, 0x30, 0x00,
+            bytesPerLine & 0xff, (bytesPerLine >> 8) & 0xff,
+            height & 0xff, (height >> 8) & 0xff
+        ]);
+
+        return Buffer.concat([header, buffer]);
     }
 
     private formatCurrency(amount: number | string | null | undefined): string {
@@ -65,225 +101,258 @@ export class ReceiptPrinter {
         return `$${num.toFixed(2)}`;
     }
 
-    private text(str: string): Buffer {
-        if (!str) return Buffer.from('');
-
-        // Check for Arabic characters
-        const hasArabic = /[\u0600-\u06FF]/.test(str);
-
-        if (hasArabic) {
-            try {
-                // Reshape Arabic (connect letters)
-                const reshaped = ArabicShaper.convertArabic(str);
-
-                // Reverse for RTL printing
-                const reversed = reshaped.split('').reverse().join('');
-
-                // Map to CP864 bytes
-                const buffer = Buffer.alloc(reversed.length);
-                for (let i = 0; i < reversed.length; i++) {
-                    const charCode = reversed.charCodeAt(i);
-                    // Check custom mapping first, then standard iconv
-                    if (CP864_MAPPING[charCode]) {
-                        buffer[i] = CP864_MAPPING[charCode];
-                    } else {
-                        // Fallback for numbers/English within the Arabic string
-                        if (charCode <= 0x7F) {
-                            buffer[i] = charCode;
-                        } else {
-                            // Try iconv as last resort or '?'
-                            const encoded = iconv.encode(reversed[i], 'cp864');
-                            buffer[i] = encoded.length > 0 ? encoded[0] : 0x3F; // 0x3F is '?'
-                        }
-                    }
-                }
-                return buffer;
-            } catch (e) {
-                console.error('Arabic shaping error:', e);
-                return Buffer.from(str, 'utf-8');
-            }
-        }
-
-        // Standard POS encoding for English
-        return iconv.encode(str, 'cp437');
-    }
     private convertToLbp(usdAmount: number, rate: number = 89500): string {
         const lbp = Math.ceil((usdAmount * rate) / 5000) * 5000;
         return lbp.toLocaleString();
     }
-    async printReceipt(receiptData: {
-        storeName: string;
-        address?: string;
-        phone?: string;
-        orderId: string;
-        items: Array<{ name: string; quantity: number; price: number; total: number }>;
-        subtotal: number;
-        tax?: number;
-        total: number;
-        paymentMethod: string;
-        cashReceived?: number;
-        change?: number;
-        timestamp: Date;
-        footerText?: string;
-        exchangeRate?: number;
-    }): Promise<void> {
-        const timestamp = new Date(receiptData.timestamp);
-        const buffers: Buffer[] = [];
+
+    private drawTextLine(ctx: any, left: string, right: string, y: number, isBold: boolean = false) {
+        ctx.font = isBold ? 'bold 22px ArabicFont' : '22px ArabicFont';
+        ctx.fillStyle = 'black';
+        ctx.textBaseline = 'top';
+
+        // Reshape text
+        const safeLeft = this.reshapeArabic(left);
+        const safeRight = this.reshapeArabic(right);
+
+        // Draw left text
+        ctx.textAlign = 'left';
+        ctx.fillText(safeLeft, this.padding, y);
+
+        if (right) {
+            ctx.textAlign = 'right';
+            ctx.fillText(safeRight, this.width - this.padding, y);
+        }
+    }
+
+    private drawCentered(ctx: any, text: string, y: number, isBold: boolean = false, fontSize: number = 22) {
+        ctx.font = isBold ? `bold ${fontSize}px ArabicFont` : `${fontSize}px ArabicFont`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        const safeText = this.reshapeArabic(text);
+        ctx.fillText(safeText, this.width / 2, y);
+    }
+
+    async printReceipt(receiptData: any): Promise<void> {
+        console.log('[PRINTER-DEBUG] Rendering receipt to bitmap image...');
+
         const RATE = receiptData.exchangeRate || 89500;
+        const timestamp = new Date(receiptData.timestamp);
 
-        // Build Payload
-        buffers.push(CMD.INIT);
-        buffers.push(CMD.KANJI_OFF); // Disable Chinese mode
-        buffers.push(CMD.CODEPAGE_ARABIC);
+        // Calculate estimated height
+        let estimatedHeight = 500; // Increased base height estimate
+        // Items * 3 lines (Name, Price, LBP)
+        estimatedHeight += (receiptData.items?.length || 0) * (this.lineHeight * 3.5);
 
-        buffers.push(CMD.ALIGN_CENTER);
-        buffers.push(CMD.BOLD_ON);
-        buffers.push(CMD.SIZE_DOUBLE);
-        buffers.push(this.text(receiptData.storeName || 'Highway Cafe'));
-        buffers.push(CMD.FEED);
+        const canvas = createCanvas(this.width, estimatedHeight + 500); // 500 extra buffer
+        const ctx = canvas.getContext('2d');
 
-        buffers.push(CMD.SIZE_NORMAL);
-        buffers.push(CMD.BOLD_OFF);
+        // White background
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'black';
+
+        let y = 20;
+
+        // Header
+        this.drawCentered(ctx, receiptData.storeName || 'Receipt', y, true, 30);
+        y += 40;
 
         if (receiptData.address) {
-            buffers.push(this.text(receiptData.address));
-            buffers.push(CMD.FEED);
+            this.drawCentered(ctx, receiptData.address, y);
+            y += this.lineHeight;
         }
         if (receiptData.phone) {
-            buffers.push(this.text(receiptData.phone));
-            buffers.push(CMD.FEED);
+            this.drawCentered(ctx, receiptData.phone, y);
+            y += this.lineHeight;
         }
 
-        buffers.push(this.text('------------------------------------------------'));
-        buffers.push(CMD.FEED);
+        y += 10;
+        this.drawTextLine(ctx, `Order #: ${receiptData.orderId}`, '', y);
+        y += this.lineHeight;
+        this.drawTextLine(ctx, `Date: ${timestamp.toLocaleString()}`, '', y);
+        y += this.lineHeight + 10; // Extra spacing
 
-        buffers.push(CMD.ALIGN_LEFT);
-        buffers.push(this.text(`Order #: ${receiptData.orderId}`));
-        buffers.push(CMD.FEED);
-        buffers.push(this.text(`Date: ${timestamp.toLocaleString()}`));
-        buffers.push(CMD.FEED);
+        // Divider
+        ctx.beginPath();
+        ctx.moveTo(10, y);
+        ctx.lineTo(this.width - 10, y);
+        ctx.stroke();
+        y += 10;
 
-        buffers.push(this.text('------------------------------------------------'));
-        buffers.push(CMD.FEED);
+        // Headers
+        this.drawTextLine(ctx, 'Item', 'Qty   Price', y, true);
+        y += this.lineHeight;
 
-        // Table Header
-        buffers.push(this.text('Item                           Qty    Price'));
-        buffers.push(CMD.FEED);
-        buffers.push(this.text('------------------------------------------------'));
-        buffers.push(CMD.FEED);
+        // Divider
+        ctx.beginPath();
+        ctx.moveTo(10, y);
+        ctx.lineTo(this.width - 10, y);
+        ctx.stroke();
+        y += 10;
 
+        // Items
         if (Array.isArray(receiptData.items)) {
             receiptData.items.forEach((item: any) => {
                 const nameStr = item.name || 'Unknown';
                 const qty = item.quantity || 0;
                 const totalUsd = item.total || 0;
-
-                // Calculate Unit Prices
                 const unitUsd = qty > 0 ? totalUsd / qty : 0;
-
-                // Convert to LBP
                 const totalLbp = this.convertToLbp(totalUsd, RATE);
-                const unitLbp = this.convertToLbp(unitUsd, RATE);
 
-                // Line 1: Item Name (Bold)
-                buffers.push(CMD.BOLD_ON);
-                buffers.push(this.text(nameStr));
-                buffers.push(CMD.BOLD_OFF);
-                buffers.push(CMD.FEED);
+                // Line 1: Item Name
+                this.drawTextLine(ctx, nameStr, '', y, true); // Bold item name
+                y += this.lineHeight;
 
-                // Line 2: Details
-                // Format: " 2 @ $5.00/450,000      $10.00/900,000"
-                const UNIT_STR = `$${unitUsd.toFixed(2)}/${unitLbp}`;
-                const TOTAL_STR = `$${totalUsd.toFixed(2)}/${totalLbp}`;
+                // Line 2: Qty x Unit Price ... Total Price
+                const priceDetail = `${qty} x ${unitUsd.toFixed(2)}`;
+                const totalDetail = `$${totalUsd.toFixed(2)}`;
+                this.drawTextLine(ctx, priceDetail, totalDetail, y);
+                y += this.lineHeight;
 
-                const leftPart = ` ${qty} @ ${UNIT_STR}`;
-                const rightPart = TOTAL_STR;
-
-                // Width 48
-                const padding = 48 - leftPart.length - rightPart.length;
-                const spaces = padding > 0 ? ' '.repeat(padding) : ' ';
-
-                buffers.push(this.text(leftPart + spaces + rightPart));
-                buffers.push(CMD.FEED);
-                buffers.push(CMD.FEED); // Extra spacing
+                // Line 3: LBP Price
+                this.drawTextLine(ctx, '', `(${totalLbp} LBP)`, y);
+                y += this.lineHeight + 5; // Extra gap item
             });
         }
 
-        buffers.push(this.text('------------------------------------------------'));
-        buffers.push(CMD.FEED);
+        // Divider
+        ctx.beginPath();
+        ctx.moveTo(10, y);
+        ctx.lineTo(this.width - 10, y);
+        ctx.stroke();
+        y += 30; // Increased spacing after item grid (was 10)
 
         // Totals
-        buffers.push(CMD.ALIGN_RIGHT);
-
         const subtotal = this.formatCurrency(receiptData.subtotal || 0);
-        buffers.push(this.text(`Subtotal: ${subtotal}`));
-        buffers.push(CMD.FEED);
+        this.drawTextLine(ctx, 'Subtotal:', subtotal, y);
+        y += this.lineHeight;
+
+        if (Number(receiptData.discountTotal || receiptData.discount) > 0) {
+            const discountAmount = Number(receiptData.discountTotal || receiptData.discount);
+            this.drawTextLine(ctx, 'Discount:', `-${this.formatCurrency(discountAmount)}`, y);
+            y += this.lineHeight;
+        }
 
         if (receiptData.tax) {
-            buffers.push(this.text(`Tax: ${this.formatCurrency(receiptData.tax || 0)}`));
-            buffers.push(CMD.FEED);
+            const tax = this.formatCurrency(receiptData.tax || 0);
+            this.drawTextLine(ctx, 'Tax:', tax, y);
+            y += this.lineHeight;
         }
 
-        buffers.push(CMD.BOLD_ON);
-        buffers.push(CMD.SIZE_DOUBLE);
-        buffers.push(this.text(`TOTAL: ${this.formatCurrency(receiptData.total)}`));
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.SIZE_NORMAL);
-        buffers.push(CMD.BOLD_OFF);
 
-        buffers.push(this.text('------------------------------------------------'));
-        buffers.push(CMD.FEED);
 
+        // Dividor before Total
+        ctx.beginPath();
+        ctx.moveTo(this.padding, y);
+        ctx.lineTo(this.width - this.padding, y);
+        ctx.stroke();
+        y += 10;
+
+        this.drawTextLine(ctx, 'TOTAL:', this.formatCurrency(receiptData.total), y, true);
+        y += this.lineHeight + 5;
+
+        // Payment Info
         const payMethod = (receiptData.paymentMethod || 'CASH').toUpperCase();
-        buffers.push(this.text(`Payment: ${payMethod}`));
-        buffers.push(CMD.FEED);
+        this.drawTextLine(ctx, 'Payment:', payMethod, y);
+        y += this.lineHeight;
 
         if (receiptData.cashReceived) {
-            buffers.push(this.text(`Cash: ${this.formatCurrency(receiptData.cashReceived)}`));
-            buffers.push(CMD.FEED);
-            buffers.push(this.text(`Change: ${this.formatCurrency(receiptData.change || 0)}`));
-            buffers.push(CMD.FEED);
+            this.drawTextLine(ctx, 'Cash:', this.formatCurrency(receiptData.cashReceived), y);
+            y += this.lineHeight;
+            this.drawTextLine(ctx, 'Change:', this.formatCurrency(receiptData.change || 0), y);
+            y += this.lineHeight;
         }
+
+        y += 40; // Add robust spacing before footer
 
         // Footer
-        buffers.push(CMD.ALIGN_CENTER);
-        buffers.push(CMD.FEED);
         if (receiptData.footerText) {
-            buffers.push(this.text(receiptData.footerText));
-            buffers.push(CMD.FEED);
+            this.drawCentered(ctx, receiptData.footerText, y);
         } else {
-            buffers.push(this.text('Thank you for your business!'));
-            buffers.push(CMD.FEED);
+            this.drawCentered(ctx, 'Thank you for your business!', y);
         }
+        y += this.lineHeight * 8; // Increased padding to ensure footer clears the cutter (approx 200px)
 
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.CUT);
+        // Crop canvas to actual used height with some padding
+        const finalHeight = y;
+        const finalCanvas = createCanvas(this.width, finalHeight);
+        const finalCtx = finalCanvas.getContext('2d');
+        // Fill white first
+        finalCtx.fillStyle = 'white';
+        finalCtx.fillRect(0, 0, this.width, finalHeight);
+        finalCtx.drawImage(canvas, 0, 0);
 
-        const fullPayload = Buffer.concat(buffers);
-        await this.write(fullPayload);
+        // Convert to Raster
+        console.log('[PRINTER-DEBUG] Converting canvas to raster buffer...');
+        const rasterData = this.convertToRaster(finalCanvas);
+
+        const initCmd = Buffer.from(ESCPOS.INIT, 'ascii');
+        const cutCmd = Buffer.from(ESCPOS.PARTIAL_CUT, 'ascii');
+        const finalBuffer = Buffer.concat([initCmd, rasterData, cutCmd]);
+
+        console.log(`[PRINTER-DEBUG] Bitmap generated, size: ${finalBuffer.length} bytes`);
+        await this.write(finalBuffer);
+    }
+
+    private async write(buffer: Buffer): Promise<void> {
+        return new Promise((resolve, reject) => {
+            // Try direct USB first
+            try {
+                if (fs.existsSync(this.devicePath)) {
+                    console.log('[PRINTER-DEBUG] Writing direct to USB:', this.devicePath);
+                    const fd = fs.openSync(this.devicePath, 'w');
+                    fs.writeSync(fd, buffer);
+                    fs.closeSync(fd);
+                    console.log('Bitmap print sent successfully via direct USB');
+                    resolve();
+                    return;
+                }
+            } catch (err: any) {
+                console.log('[PRINTER-DEBUG] Direct USB failed:', err.message);
+            }
+
+            // Fallback to lp command
+            console.log('[PRINTER-DEBUG] Fallback to lp raw');
+            // Pipe buffer to lp
+            const lp = spawn('lp', ['-d', 'Printer-POS-80-Raw', '-o', 'raw']);
+
+            lp.stdin.on('error', (err) => {
+                console.error('LP stdin error:', err);
+                reject(err);
+            });
+
+            lp.stdin.write(buffer);
+            lp.stdin.end();
+
+            lp.on('close', (code) => {
+                if (code === 0) resolve();
+                else reject(new Error(`lp failed with code ${code}`));
+            });
+
+            lp.on('error', (err) => {
+                console.error('LP error:', err);
+                reject(err);
+            });
+        });
     }
 
     async testPrint(): Promise<void> {
-        let buffers: Buffer[] = [];
-        buffers.push(CMD.INIT);
-        buffers.push(CMD.ALIGN_CENTER);
-        buffers.push(CMD.BOLD_ON);
-        buffers.push(CMD.SIZE_DOUBLE);
-        buffers.push(this.text('TEST PRINT'));
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.SIZE_NORMAL);
-        buffers.push(CMD.BOLD_OFF);
-        buffers.push(this.text('Printer is working correctly!'));
-        buffers.push(CMD.FEED);
-        buffers.push(this.text(`Date: ${new Date().toLocaleString()}`));
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.FEED);
-        buffers.push(CMD.CUT);
-
-        await this.write(Buffer.concat(buffers));
+        // Create dummy order data for test
+        const testData = {
+            orderId: 'TEST-BITMAP',
+            storeName: 'Heavy\'s Grill',
+            timestamp: new Date(),
+            items: [
+                { name: 'شاورما دجاج', quantity: 1, price: 5, total: 5 },
+                { name: 'Burger', quantity: 2, price: 8, total: 16 }
+            ],
+            subtotal: 21,
+            total: 21,
+            paymentMethod: 'CASH',
+            footerText: 'Bitmap Printing Test'
+        };
+        await this.printReceipt(testData);
     }
 }
 
