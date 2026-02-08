@@ -1,0 +1,12 @@
+node_modules
+.git
+.env
+dist
+release
+backups
+*.log
+npm-debug.log
+.DS_Store
+Thumbs.db
+scripts/local-*.js
+scripts/temp-*.js
