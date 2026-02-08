@@ -96,6 +96,3 @@ volumes:
 networks:
   highway_cafe_network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
