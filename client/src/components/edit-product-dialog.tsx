@@ -55,7 +55,7 @@ export function EditProductDialog({ product, children }: EditProductDialogProps)
       profitMargin: (product as any).profitMargin || "25",
       categoryId: product.categoryId || "",
       type: product.type,
-      stockQuantity: product.stockQuantity,
+      stockQuantity: Number(product.stockQuantity),
       minThreshold: product.minThreshold,
       isActive: product.isActive,
       requiresFulfillment: (product as any).requiresFulfillment ?? false,
@@ -74,7 +74,7 @@ export function EditProductDialog({ product, children }: EditProductDialogProps)
       profitMargin: (product as any).profitMargin || "25",
       categoryId: product.categoryId || "",
       type: product.type,
-      stockQuantity: product.stockQuantity,
+      stockQuantity: Number(product.stockQuantity),
       minThreshold: product.minThreshold,
       isActive: product.isActive,
       requiresFulfillment: (product as any).requiresFulfillment ?? false,
@@ -163,7 +163,12 @@ export function EditProductDialog({ product, children }: EditProductDialogProps)
   };
 
   const onSubmit = (data: EditProductForm) => {
-    updateProductMutation.mutate(data);
+    // Convert back to format expected by API (decimal string)
+    const payload = {
+      ...data,
+      stockQuantity: String(data.stockQuantity),
+    };
+    updateProductMutation.mutate(payload as unknown as InsertProduct);
   };
 
   const defaultTrigger = (
