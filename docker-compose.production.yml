@@ -34,8 +34,6 @@ services:
       - ./release:/app/release
     networks:
       - highway_cafe_network
-    devices:
-      - "/dev/usb/lp1:/dev/usb/lp1"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:5003/health" ]
       interval: 30s
