@@ -2,8 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import { writeFile } from 'fs/promises';
 import { constants, accessSync } from 'fs';
-// @ts-ignore
-import { ArabicShaper } from 'arabic-persian-reshaper';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { ArabicShaper } = require('arabic-persian-reshaper');
 import iconv from 'iconv-lite';
 import { CP864_MAPPING } from './server/cp864-map';
 
@@ -44,11 +45,6 @@ class LocalReceiptPrinter {
         if (!this.devicePath) {
             console.warn('[Printer] No writable printer device found. USB printing will fail.');
         }
-    }
-
-    private formatCurrency(amount: number | string | null | undefined): string {
-        const num = Number(amount) || 0;
-        return `$${num.toFixed(2)}`;
     }
 
     private text(str: string): Buffer {
@@ -159,7 +155,6 @@ class LocalReceiptPrinter {
                 buffers.push(CMD.FEED);
 
                 // Line 2: Details
-                // Format: " 2 @ $5.00/450,000      $10.00/900,000"
                 const UNIT_STR = `$${unitUsd.toFixed(2)}/${unitLbp}`;
                 const TOTAL_STR = `$${totalUsd.toFixed(2)}/${totalLbp}`;
 
@@ -267,7 +262,7 @@ app.post('/print', async (req, res) => {
 });
 
 app.get('/status', (req, res) => {
-    res.json({ status: 'running', printer_connected: true });
+    res.json({ status: 'running', printer_connected: !!printer['devicePath'] });
 });
 
 app.listen(port, () => {

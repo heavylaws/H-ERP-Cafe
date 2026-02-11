@@ -2423,15 +2423,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Phase 2: Architecture Modernization - Mount v1 modular routes
   app.use('/api/v1', v1Routes);
 
-  const httpServer = createServer(app);
-
-  // Initialize WebSocket Service (Shared)
-  // Uses path /ws/app to avoid conflict with Vite's HMR WebSocket
-  const { setupWebSocket } = await import('./services/websocket');
-  wssGlobal = setupWebSocket(httpServer);
-
-  return httpServer;
-
+  // Export routes
   app.use("/api/export", exportRoutes);
 
   // Thermal Printer Routes
@@ -2455,15 +2447,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Test print error:', error);
       res.status(500).json({ success: false, message: error.message });
     }
-  });
-
-  // Login route
-  app.post("/api/login", async (req, res) => {
-    const { username, password } = req.body;
-    // Implement your login logic here
-    // For example, check username and password against the database
-    // If valid, create a session and return user data
-    // If invalid, return an error message
   });
 
   if (ENABLE_OPTIONS_SYSTEM) {
@@ -2674,6 +2657,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
   }
+
+  const httpServer = createServer(app);
+
+  // Initialize WebSocket Service (Shared)
+  // Uses path /ws/app to avoid conflict with Vite's HMR WebSocket
+  const { setupWebSocket } = await import('./services/websocket');
+  wssGlobal = setupWebSocket(httpServer);
 
   return httpServer;
 }

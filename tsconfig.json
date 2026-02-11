@@ -25,14 +25,6 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "moduleResolution": "bundler",
-    "baseUrl": ".",
-    "types": [
-      "node",
-      "vite/client",
-      "vitest/globals",
-      "@testing-library/jest-dom",
-      "vite-plugin-pwa/client"
-    ],
     "paths": {
       "@/*": [
         "./client/src/*"

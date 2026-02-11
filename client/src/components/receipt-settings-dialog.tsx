@@ -10,6 +10,7 @@ import {
     DialogTrigger,
     DialogFooter,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import {
     Form,
     FormControl,
@@ -206,6 +207,40 @@ export function ReceiptSettingsDialog() {
                                     </FormItem>
                                 )}
                             />
+
+                            <div className="flex items-center space-x-2 border rounded-lg p-3 bg-gray-50 mb-4">
+                                <Switch
+                                    id="printer-mode"
+                                    checked={localStorage.getItem('PRINTER_MODE') === 'LOCAL'}
+                                    onCheckedChange={(checked) => {
+                                        if (checked) {
+                                            localStorage.setItem('PRINTER_MODE', 'LOCAL');
+                                        } else {
+                                            localStorage.removeItem('PRINTER_MODE');
+                                        }
+                                        // Force re-render to update switch state
+                                        setOpen(false);
+                                        setTimeout(() => setOpen(true), 10);
+                                        toast({
+                                            title: checked ? "Local Printer Agent Enabled" : "Server Printer Enabled",
+                                            description: checked
+                                                ? "Printing will now go to the local agent on this machine."
+                                                : "Printing will go to the server's attached printer.",
+                                        });
+                                    }}
+                                />
+                                <div className="grid gap-1.5 leading-none">
+                                    <label
+                                        htmlFor="printer-mode"
+                                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                    >
+                                        Use Local Printer Agent
+                                    </label>
+                                    <p className="text-xs text-muted-foreground">
+                                        Enable this if the printer is connected to this computer (Cashier Station).
+                                    </p>
+                                </div>
+                            </div>
 
                             <DialogFooter>
                                 <Button type="submit" disabled={mutation.isPending}>
