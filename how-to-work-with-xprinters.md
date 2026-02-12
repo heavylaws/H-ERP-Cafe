@@ -112,3 +112,33 @@ ctx.fillText(final, x, y);
 
 - **Cause**: Missing system build tools.
 - **Fix**: Install `libcairo2-dev` and related packages (see Prerequisites).
+
+## 5. Local Printer Agent (Client-Side Printing)
+
+If the printer is connected to the **Client/Cashier Machine** (not the server), the server cannot write to USB directly.
+Instead, we use a **Local Printer Agent** running on the client machine.
+
+### Architecture
+User clicks "Print" -> Browser sends JSON to `localhost:4000` -> Agent writes to `/dev/usb/lp1`.
+
+### Setup
+The agent code is located in `printer-agent/` directory.
+
+1.  **Install & Start:**
+    ```bash
+    cd printer-agent
+    npm install
+    ./start-agent.sh
+    ```
+
+2.  **Auto-Start (Systemd):**
+    ```bash
+    mkdir -p ~/.config/systemd/user
+    cp printer-agent.service ~/.config/systemd/user/
+    systemctl --user daemon-reload
+    systemctl --user enable --now printer-agent
+    ```
+
+3.  **Configure POS:**
+    - Go to **Receipt Settings** in the POS.
+    - Enable **"Use Local Printer Agent"**.

@@ -6,7 +6,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { ArabicShaper } = require('arabic-persian-reshaper');
 import iconv from 'iconv-lite';
-import { CP864_MAPPING } from './server/cp864-map';
+import { CP864_MAPPING } from '../server/cp864-map';
 
 // ESC/POS Commands
 const CMD = {

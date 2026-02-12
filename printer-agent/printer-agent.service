@@ -1,0 +1,13 @@
+[Unit]
+Description=Highway Cafe Printer Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cashier/.gemini/antigravity/scratch/H-ERP-Cafe/printer-agent
+ExecStart=/bin/bash /home/cashier/.gemini/antigravity/scratch/H-ERP-Cafe/printer-agent/start-agent.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
