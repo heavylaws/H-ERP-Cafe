@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { writeFile } from 'fs/promises';
 import { constants, accessSync } from 'fs';
@@ -249,7 +249,7 @@ const printer = new LocalReceiptPrinter();
 app.use(cors({ origin: '*' })); // Allow browser to call localhost
 app.use(express.json());
 
-app.post('/print', async (req, res) => {
+app.post('/print', async (req: Request, res: Response) => {
     console.log('[Agent] Print request received');
     try {
         await printer.printReceipt(req.body);
@@ -261,7 +261,7 @@ app.post('/print', async (req, res) => {
     }
 });
 
-app.get('/status', (req, res) => {
+app.get('/status', (req: Request, res: Response) => {
     res.json({ status: 'running', printer_connected: !!printer['devicePath'] });
 });
 
