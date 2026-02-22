@@ -37,10 +37,26 @@ export async function printReceipt(receiptData: any): Promise<void> {
             });
 
             if (!res.ok) {
+                // Try to extract the specific error message from the agent (e.g., "Printer disconnected.")
+                try {
+                    const errorData = await res.json();
+                    if (errorData && errorData.error) {
+                        throw new Error(`Local Printer Error: ${errorData.error}`);
+                    }
+                } catch (parseError) {
+                    // Ignore parse error, fallback to generic error below
+                }
                 throw new Error('Local Agent failed to print');
             }
-        } catch (e) {
+        } catch (e: any) {
             console.error('Local Print Error:', e);
+
+            // If the error was thrown by our own block above (it has "Local Printer Error:"), re-throw it as is
+            if (e.message && e.message.startsWith('Local Printer Error:')) {
+                throw new Error(e.message.replace('Local Printer Error: ', '')); // Clean up prefix for UI
+            }
+
+            // Otherwise, it was a network failure connecting to localhost:4000
             throw new Error('Could not connect to Local Printer Agent. Is it running?');
         }
         return;

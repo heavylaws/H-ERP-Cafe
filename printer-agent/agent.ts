@@ -28,12 +28,18 @@ class LocalReceiptPrinter {
     private devicePath: string;
 
     constructor() {
+        this.devicePath = '';
+        this.detectPrinter();
+    }
+
+    private detectPrinter() {
         const possiblePaths = ['/dev/usb/lp1', '/dev/usb/lp0', '/dev/lp1', '/dev/lp0'];
         this.devicePath = '';
 
         for (const path of possiblePaths) {
             try {
-                accessSync(path, constants.F_OK);
+                // Check for Write permission, which is required to send to printer
+                accessSync(path, constants.W_OK);
                 this.devicePath = path;
                 console.log(`[Printer] Device found at: ${this.devicePath}`);
                 break;
@@ -82,8 +88,25 @@ class LocalReceiptPrinter {
     }
 
     async write(buffer: Buffer): Promise<void> {
-        if (!this.devicePath) throw new Error('No printer device available');
-        await writeFile(this.devicePath, buffer);
+        // Always try to detect if we don't have a path
+        if (!this.devicePath) {
+            this.detectPrinter();
+        }
+
+        if (!this.devicePath) throw new Error('Printer disconnected. Please check USB and power.');
+
+        try {
+            await writeFile(this.devicePath, buffer);
+        } catch (error) {
+            console.warn(`[Printer] Failed to write to ${this.devicePath}, attempting redetection...`);
+            // If the write fails (e.g. device was unplugged), try to find it again
+            this.detectPrinter();
+            if (!this.devicePath) {
+                throw new Error('Printer disconnected. Please check USB and power.');
+            }
+            // Retry once
+            await writeFile(this.devicePath, buffer);
+        }
     }
 
     private convertToLbp(usdAmount: number, rate: number = 89500): string {
